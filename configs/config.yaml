@@ -1,20 +1,25 @@
 port: 8080
-strategy: "round-robin"  # Options: round-robin, weighted-round-robin, least-connections
+strategy: "round-robin" # Options: round-robin, weighted-round-robin, least-connections
 
 backends:
   - url: "http://localhost:8081"
-    weight: 3  # Gets 3x traffic (for weighted strategies)
+    weight: 3 # Gets 3x traffic (for weighted strategies)
 
   - url: "http://localhost:8082"
-    weight: 2  # Gets 2x traffic
+    weight: 2 # Gets 2x traffic
 
   - url: "http://localhost:8083"
-    weight: 1  # Gets 1x traffic
+    weight: 1 # Gets 1x traffic
 
 health_check:
   enabled: true
-  interval: 5        # Check every 5 seconds
-  timeout: 3         # 3 second timeout
-  healthy_threshold: 2    # 2 successes → HEALTHY
-  unhealthy_threshold: 3  # 3 failures → UNHEALTHY
-  path: "/health"    # Health check endpoint
+  interval: 5 # Check every 5 seconds
+  timeout: 3 # 3 second timeout
+  healthy_threshold: 2 # 2 successes → HEALTHY
+  unhealthy_threshold: 3 # 3 failures → UNHEALTHY
+  path: "/health" # Health check endpoint
+
+retry:
+  enabled: true
+  max_attempts: 2      # Original + 1 retry
+  budget_percent: 10   # 10% of requests can be retries

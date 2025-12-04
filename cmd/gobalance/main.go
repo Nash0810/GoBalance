@@ -10,6 +10,7 @@ import (
 	"github.com/Nash0810/gobalance/internal/balancer"
 	"github.com/Nash0810/gobalance/internal/config"
 	"github.com/Nash0810/gobalance/internal/health"
+	"github.com/Nash0810/gobalance/internal/retry"
 )
 
 func main() {
@@ -63,8 +64,15 @@ func main() {
 	// Create passive tracker
 	passiveTracker := health.NewPassiveTracker(5) // 5 failures threshold
 
+	// Create retry policy
+	retryPolicy := retry.NewPolicy(cfg.Retry.MaxAttempts, cfg.Retry.BudgetPercent)
+	if cfg.Retry.Enabled {
+		log.Printf("Retry enabled: max_attempts=%d, budget=%d%%",
+			cfg.Retry.MaxAttempts, cfg.Retry.BudgetPercent)
+	}
+
 	// Create balancer
-	lb := balancer.NewBalancer(pool, strategy, passiveTracker)
+	lb := balancer.NewBalancer(pool, strategy, passiveTracker, retryPolicy)
 
 	// Start server
 	addr := fmt.Sprintf(":%d", cfg.Port)

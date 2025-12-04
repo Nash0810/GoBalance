@@ -46,5 +46,13 @@ func LoadConfig(filepath string) (*Config, error) {
 		config.HealthCheck.Path = "/health"
 	}
 
+	// Retry defaults
+	if config.Retry.MaxAttempts == 0 {
+		config.Retry.MaxAttempts = 2 // Original + 1 retry
+	}
+	if config.Retry.BudgetPercent == 0 {
+		config.Retry.BudgetPercent = 10 // 10% of requests can be retries
+	}
+
 	return &config, nil
 }

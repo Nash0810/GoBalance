@@ -10,6 +10,7 @@ type Config struct {
 	Backends    []BackendConfig   `yaml:"backends"`     // Backend URLs with weights
 	Strategy    string            `yaml:"strategy"`     // Load balancing strategy
 	HealthCheck HealthCheckConfig `yaml:"health_check"` // Health check configuration
+	Retry       RetryConfig       `yaml:"retry"`        // Retry configuration
 }
 
 // BackendConfig represents a single backend configuration
@@ -26,6 +27,13 @@ type HealthCheckConfig struct {
 	HealthyThreshold   int    `yaml:"healthy_threshold"`   // Successes needed to mark healthy
 	UnhealthyThreshold int    `yaml:"unhealthy_threshold"` // Failures needed to mark unhealthy
 	Path               string `yaml:"path"`                // Health check endpoint path
+}
+
+// RetryConfig defines retry behavior
+type RetryConfig struct {
+	Enabled       bool `yaml:"enabled"`        // Enable retries
+	MaxAttempts   int  `yaml:"max_attempts"`   // Total attempts (original + retries)
+	BudgetPercent int  `yaml:"budget_percent"` // % of requests that can be retries
 }
 
 // ParsedBackend represents a backend with parsed URL

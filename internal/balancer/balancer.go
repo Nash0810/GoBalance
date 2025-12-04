@@ -1,62 +1,158 @@
 package balancer
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sync"
 
 	"github.com/Nash0810/gobalance/internal/backend"
 	"github.com/Nash0810/gobalance/internal/health"
+	"github.com/Nash0810/gobalance/internal/retry"
 )
 
 // Balancer handles request routing
 type Balancer struct {
-	pool           *backend.Pool
-	strategy       Strategy
-	passiveTracker *health.PassiveTracker
+	pool            *backend.Pool
+	strategy        Strategy
+	passiveTracker  *health.PassiveTracker
+	retryPolicy     *retry.Policy
+	circuitBreakers map[string]*health.CircuitBreaker // Per-backend circuit breakers
+	cbMux           sync.RWMutex                      // Protects circuit breakers map
 }
 
 // NewBalancer creates a new balancer instance
-func NewBalancer(pool *backend.Pool, strategy Strategy, passiveTracker *health.PassiveTracker) *Balancer {
+func NewBalancer(pool *backend.Pool, strategy Strategy, passiveTracker *health.PassiveTracker, retryPolicy *retry.Policy) *Balancer {
 	return &Balancer{
-		pool:           pool,
-		strategy:       strategy,
-		passiveTracker: passiveTracker,
+		pool:            pool,
+		strategy:        strategy,
+		passiveTracker:  passiveTracker,
+		retryPolicy:     retryPolicy,
+		circuitBreakers: make(map[string]*health.CircuitBreaker),
 	}
+}
+
+// getCircuitBreaker gets or creates a circuit breaker for a backend
+func (lb *Balancer) getCircuitBreaker(backend *backend.Backend) *health.CircuitBreaker {
+	key := backend.URL.Host
+
+	lb.cbMux.RLock()
+	cb, exists := lb.circuitBreakers[key]
+	lb.cbMux.RUnlock()
+
+	if exists {
+		return cb
+	}
+
+	lb.cbMux.Lock()
+	defer lb.cbMux.Unlock()
+
+	// Double-check after acquiring write lock
+	if cb, exists := lb.circuitBreakers[key]; exists {
+		return cb
+	}
+
+	// Create new circuit breaker
+	cb = health.NewCircuitBreaker(key)
+	lb.circuitBreakers[key] = cb
+	return cb
 }
 
 // ServeHTTP implements http.Handler interface
+// Incorporates FIX #2 (body buffering), FIX #4 (context propagation)
 func (lb *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := lb.strategy.SelectBackend(lb.pool)
-
-	if backend == nil {
-		log.Printf("No healthy backends available")
-		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
-		return
+	// FIX #2: Buffer request body for potential retries
+	var bodyBytes []byte
+	var err error
+	if lb.retryPolicy != nil && r.Body != nil {
+		bodyBytes, err = io.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("Failed to buffer request body: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		r.Body.Close()
+		// Restore body for first attempt
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
 
-	log.Printf("Routing request to: %s (state: %s)",
-		backend.URL.String(), backend.GetState())
+	maxAttempts := 1
+	if lb.retryPolicy != nil {
+		maxAttempts = lb.retryPolicy.GetBudget().GetAvailable() + 1 // Track for adaptive budget
+	}
 
-	backend.IncrementActiveRequests()
-	defer backend.DecrementActiveRequests()
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// FIX #4: Check if client canceled request
+		if r.Context().Err() != nil {
+			log.Printf("[REQUEST] Client canceled request")
+			http.Error(w, "Request Canceled", 499)
+			return
+		}
 
-	// Create a custom response writer to capture errors
-	crw := &captureResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		backend := lb.strategy.SelectBackend(lb.pool)
 
-	// Forward request
-	backend.ReverseProxy.ServeHTTP(crw, r)
+		if backend == nil {
+			log.Printf("No healthy backends available")
+			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+			return
+		}
 
-	// Track success/failure
-	if crw.statusCode >= 500 {
-		lb.passiveTracker.RecordFailure(backend, fmt.Errorf("status %d", crw.statusCode))
-	} else {
+		// Get circuit breaker for this backend
+		cb := lb.getCircuitBreaker(backend)
+
+		// Check circuit breaker
+		if !cb.AllowRequest() {
+			log.Printf("[CIRCUIT] %s: Circuit OPEN, trying next backend", backend.URL.Host)
+			if attempt < maxAttempts {
+				continue // Try different backend
+			}
+			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+			return
+		}
+
+		log.Printf("Routing request to: %s (attempt %d, state: %s, circuit: %s)",
+			backend.URL.String(), attempt, backend.GetState(), cb.GetState())
+
+		backend.IncrementActiveRequests()
+
+		// Create a custom response writer to capture errors
+		crw := &captureResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// FIX #2: Restore body for retry attempts
+		if bodyBytes != nil && attempt > 1 {
+			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		}
+
+		// Forward request
+		backend.ReverseProxy.ServeHTTP(crw, r)
+
+		backend.DecrementActiveRequests()
+
+		// Check if request succeeded
+		if crw.statusCode >= 500 {
+			err := fmt.Errorf("status %d", crw.statusCode)
+			lb.passiveTracker.RecordFailure(backend, err)
+			cb.RecordFailure()
+
+			// Should retry?
+			if lb.retryPolicy != nil && lb.retryPolicy.ShouldRetry(r, err, attempt) {
+				log.Printf("[RETRY] Retrying request (attempt %d)", attempt+1)
+				continue
+			}
+
+			return // Don't retry
+		}
+
+		// Success
 		lb.passiveTracker.RecordSuccess(backend)
+		cb.RecordSuccess()
+		return
 	}
 }
 
-// captureResponseWriter captures the status code (FIX: Added mutex for thread-safety)
+// captureResponseWriter captures the status code (FIX #1: Added mutex for thread-safety)
 type captureResponseWriter struct {
 	http.ResponseWriter
 	statusCode int
