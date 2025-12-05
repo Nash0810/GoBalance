@@ -44,3 +44,6 @@ gobalance.exe
 *.out
 
 coverage
+
+*.md
+!readme.md
