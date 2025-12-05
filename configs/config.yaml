@@ -1,4 +1,4 @@
-port: 8080
+port: 9090
 strategy: "round-robin" # Options: round-robin, weighted-round-robin, least-connections
 request_timeout: 30 # Per-request timeout in seconds (FIX #8)
 
