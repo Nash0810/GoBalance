@@ -80,7 +80,8 @@ func (lb *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	maxAttempts := 1
 	if lb.retryPolicy != nil {
-		maxAttempts = lb.retryPolicy.GetBudget().GetAvailable() + 1 // Track for adaptive budget
+		lb.retryPolicy.GetBudget().TrackRequest() // Track for adaptive budget
+		maxAttempts = 3 // Allow up to 3 total attempts (original + 2 retries)
 	}
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {

@@ -2,7 +2,6 @@ package retry
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"log"
 	"net/http"
