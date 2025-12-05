@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/Nash0810/gobalance/internal/logging"
+	"github.com/fsnotify/fsnotify"
 )
 
 // Watcher watches for config file changes and triggers reloads

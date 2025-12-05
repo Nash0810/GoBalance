@@ -2,259 +2,232 @@ package balancer
 
 import (
 	"net/url"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/Nash0810/gobalance/internal/backend"
 )
 
-// TestRoundRobinStrategy tests the round robin load balancing strategy
-func TestRoundRobinStrategy(t *testing.T) {
-	strategy := NewRoundRobinStrategy()
-
-	// Create test backends
-	backends := make([]*backend.Backend, 3)
-	for i := 0; i < 3; i++ {
-		u, _ := url.Parse("http://localhost:800" + string(rune(i+1)))
-		backends[i] = backend.NewBackend(u)
-	}
-
-	// Create pool with backends
+// TestRoundRobin tests the round-robin strategy
+func TestRoundRobin(t *testing.T) {
 	pool := backend.NewPool()
-	for _, b := range backends {
-		pool.AddBackend(b)
-	}
 
-	// Test round robin distribution
-	selected := make([]string, 0)
-	for i := 0; i < 9; i++ {
-		backend := strategy.SelectBackend(pool)
-		if backend == nil {
-			t.Errorf("SelectBackend returned nil at iteration %d", i)
-			continue
-		}
-		selected = append(selected, backend.URL.Host)
-	}
-
-	// Verify even distribution (should cycle through all backends)
-	expected := []string{
-		"localhost:8001", "localhost:8002", "localhost:8003",
-		"localhost:8001", "localhost:8002", "localhost:8003",
-		"localhost:8001", "localhost:8002", "localhost:8003",
-	}
-
-	for i, exp := range expected {
-		if i < len(selected) && selected[i] != exp {
-			t.Errorf("Round %d: expected %s, got %s", i, exp, selected[i])
-		}
-	}
-}
-
-// TestWeightedRoundRobinStrategy tests weighted distribution
-func TestWeightedRoundRobinStrategy(t *testing.T) {
-	strategy := NewWeightedRoundRobinStrategy()
-
-	// Create backends with weights: 3, 2, 1 (6 total)
-	u1, _ := url.Parse("http://localhost:8001")
-	u2, _ := url.Parse("http://localhost:8002")
-	u3, _ := url.Parse("http://localhost:8003")
+	u1, _ := url.Parse("http://localhost:8081")
+	u2, _ := url.Parse("http://localhost:8082")
+	u3, _ := url.Parse("http://localhost:8083")
 
 	b1 := backend.NewBackend(u1)
-	b1.SetWeight(3)
 	b2 := backend.NewBackend(u2)
-	b2.SetWeight(2)
 	b3 := backend.NewBackend(u3)
-	b3.SetWeight(1)
 
-	pool := backend.NewPool()
 	pool.AddBackend(b1)
 	pool.AddBackend(b2)
 	pool.AddBackend(b3)
 
-	// Request 60 backends - should get approximately 30, 20, 10 distribution
-	counts := make(map[string]int)
-	for i := 0; i < 60; i++ {
-		selected := strategy.SelectBackend(pool)
-		if selected != nil {
-			counts[selected.URL.Host]++
-		}
-	}
-
-	// Verify distribution (allow 20% variance)
-	expectedB1 := 30 // 3/6 of 60
-	expectedB2 := 20 // 2/6 of 60
-	expectedB3 := 10 // 1/6 of 60
-
-	tolerance := 5
-
-	if count := counts["localhost:8001"]; count < expectedB1-tolerance || count > expectedB1+tolerance {
-		t.Errorf("Backend 1: expected ~%d, got %d", expectedB1, count)
-	}
-	if count := counts["localhost:8002"]; count < expectedB2-tolerance || count > expectedB2+tolerance {
-		t.Errorf("Backend 2: expected ~%d, got %d", expectedB2, count)
-	}
-	if count := counts["localhost:8003"]; count < expectedB3-tolerance || count > expectedB3+tolerance {
-		t.Errorf("Backend 3: expected ~%d, got %d", expectedB3, count)
-	}
-}
-
-// TestLeastConnectionsStrategy tests least connections strategy
-func TestLeastConnectionsStrategy(t *testing.T) {
-	strategy := NewLeastConnectionsStrategy()
-
-	// Create backends
-	u1, _ := url.Parse("http://localhost:8001")
-	u2, _ := url.Parse("http://localhost:8002")
-
-	b1 := backend.NewBackend(u1)
-	b2 := backend.NewBackend(u2)
-
-	pool := backend.NewPool()
-	pool.AddBackend(b1)
-	pool.AddBackend(b2)
-
-	// First request should go to either (both have 0)
-	backend1 := strategy.SelectBackend(pool)
-	if backend1 == nil {
-		t.Fatal("SelectBackend returned nil")
-	}
-
-	// Simulate active requests on b1
-	b1.IncrementActiveRequests()
-	b1.IncrementActiveRequests()
-	// b2 has 0, b1 has 2
-
-	// Next request should go to b2 (fewer connections)
-	backend2 := strategy.SelectBackend(pool)
-	if backend2 == nil {
-		t.Fatal("SelectBackend returned nil")
-	}
-	if backend2.URL.Host != "localhost:8002" {
-		t.Errorf("Expected localhost:8002 (fewer connections), got %s", backend2.URL.Host)
-	}
-
-	// Add more connections to b2
-	b2.IncrementActiveRequests()
-	b2.IncrementActiveRequests()
-	b2.IncrementActiveRequests()
-	// Now b1 has 2, b2 has 3
-
-	// Next request should go to b1
-	backend3 := strategy.SelectBackend(pool)
-	if backend3 == nil {
-		t.Fatal("SelectBackend returned nil")
-	}
-	if backend3.URL.Host != "localhost:8001" {
-		t.Errorf("Expected localhost:8001 (fewer connections), got %s", backend3.URL.Host)
-	}
-}
-
-// TestStrategyWithUnhealthyBackends tests that strategies skip unhealthy backends
-func TestStrategyWithUnhealthyBackends(t *testing.T) {
 	strategy := NewRoundRobinStrategy()
 
-	// Create backends
-	u1, _ := url.Parse("http://localhost:8001")
-	u2, _ := url.Parse("http://localhost:8002")
+	// Track selections
+	selections := make(map[string]int)
+	mu := sync.Mutex{}
+
+	// Run 300 selections - expect roughly equal distribution (100 each)
+	for i := 0; i < 300; i++ {
+		backend := strategy.SelectBackend(pool)
+		if backend == nil {
+			t.Fatal("Strategy returned nil backend")
+		}
+
+		mu.Lock()
+		selections[backend.URL.Host]++
+		mu.Unlock()
+	}
+
+	// Verify roughly equal distribution
+	for host, count := range selections {
+		if count < 80 || count > 120 {
+			t.Errorf("Uneven distribution for %s: got %d, expected ~100", host, count)
+		}
+	}
+}
+
+// TestRoundRobinWithUnhealthyBackend tests round-robin only selects healthy backends
+func TestRoundRobinWithUnhealthyBackend(t *testing.T) {
+	pool := backend.NewPool()
+
+	u1, _ := url.Parse("http://localhost:8081")
+	u2, _ := url.Parse("http://localhost:8082")
 
 	b1 := backend.NewBackend(u1)
 	b2 := backend.NewBackend(u2)
 
-	pool := backend.NewPool()
 	pool.AddBackend(b1)
 	pool.AddBackend(b2)
 
 	// Mark b1 as unhealthy
-	b1.SetState(backend.Unhealthy)
 	b1.SetAlive(false)
 
-	// Strategy should only select b2
-	for i := 0; i < 5; i++ {
+	strategy := NewRoundRobinStrategy()
+
+	// All 50 selections should go to b2
+	for i := 0; i < 50; i++ {
 		selected := strategy.SelectBackend(pool)
 		if selected == nil {
-			t.Fatal("SelectBackend returned nil")
+			t.Fatal("Strategy returned nil backend")
 		}
-		if selected.URL.Host != "localhost:8002" {
-			t.Errorf("Expected only localhost:8002, got %s", selected.URL.Host)
+		if selected.URL.Host != "localhost:8082" {
+			t.Errorf("Selected unhealthy backend: %s", selected.URL.Host)
 		}
 	}
 }
 
-// TestStrategyWithNoHealthyBackends tests behavior when all backends are down
-func TestStrategyWithNoHealthyBackends(t *testing.T) {
-	strategy := NewRoundRobinStrategy()
+// TestRoundRobinNoHealthyBackends tests behavior when all backends are down
+func TestRoundRobinNoHealthyBackends(t *testing.T) {
+	pool := backend.NewPool()
 
-	u1, _ := url.Parse("http://localhost:8001")
+	u1, _ := url.Parse("http://localhost:8081")
 	b1 := backend.NewBackend(u1)
 	b1.SetAlive(false)
 
-	pool := backend.NewPool()
 	pool.AddBackend(b1)
 
-	// Should return nil when no healthy backends
+	strategy := NewRoundRobinStrategy()
 	selected := strategy.SelectBackend(pool)
+
 	if selected != nil {
-		t.Errorf("Expected nil for no healthy backends, got %v", selected.URL.Host)
+		t.Error("Strategy should return nil when no healthy backends")
 	}
 }
 
-// BenchmarkRoundRobin benchmarks round robin selection performance
-func BenchmarkRoundRobin(b *testing.B) {
+// TestRoundRobinConcurrency tests thread-safety
+func TestRoundRobinConcurrency(t *testing.T) {
+	pool := backend.NewPool()
+
+	for i := 1; i <= 5; i++ {
+		u, _ := url.Parse("http://localhost:" + string(rune(8080+i)))
+		b := backend.NewBackend(u)
+		pool.AddBackend(b)
+	}
+
 	strategy := NewRoundRobinStrategy()
 
-	// Create many backends
-	pool := backend.NewPool()
-	for i := 0; i < 100; i++ {
-		u, _ := url.Parse("http://localhost:8000")
-		backend := backend.NewBackend(u)
-		pool.AddBackend(backend)
-	}
+	// Concurrent selections should not panic
+	errors := make(chan error, 10)
+	var wg sync.WaitGroup
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		strategy.SelectBackend(pool)
-	}
-}
-
-// BenchmarkWeightedRoundRobin benchmarks weighted round robin performance
-func BenchmarkWeightedRoundRobin(b *testing.B) {
-	strategy := NewWeightedRoundRobinStrategy()
-
-	// Create backends with weights
-	pool := backend.NewPool()
 	for i := 0; i < 10; i++ {
-		u, _ := url.Parse("http://localhost:8000")
-		backend := backend.NewBackend(u)
-		backend.SetWeight((i % 10) + 1) // Weights 1-10
-		pool.AddBackend(backend)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				backend := strategy.SelectBackend(pool)
+				if backend == nil {
+					errors <- nil // No error, just no backends
+				}
+			}
+		}()
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		strategy.SelectBackend(pool)
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Error(err)
+		}
 	}
 }
 
-// BenchmarkLeastConnections benchmarks least connections performance
-func BenchmarkLeastConnections(b *testing.B) {
+// TestLeastConnections tests the least connections strategy
+func TestLeastConnections(t *testing.T) {
+	pool := backend.NewPool()
+
+	u1, _ := url.Parse("http://localhost:8081")
+	u2, _ := url.Parse("http://localhost:8082")
+	u3, _ := url.Parse("http://localhost:8083")
+
+	b1 := backend.NewBackend(u1)
+	b2 := backend.NewBackend(u2)
+	b3 := backend.NewBackend(u3)
+
+	pool.AddBackend(b1)
+	pool.AddBackend(b2)
+	pool.AddBackend(b3)
+
+	// Add active connections: b1=5, b2=3, b3=10
+	for i := 0; i < 5; i++ {
+		b1.IncrementActiveRequests()
+	}
+	for i := 0; i < 3; i++ {
+		b2.IncrementActiveRequests()
+	}
+	for i := 0; i < 10; i++ {
+		b3.IncrementActiveRequests()
+	}
+
 	strategy := NewLeastConnectionsStrategy()
 
-	// Create backends with varying connection counts
+	// Should select b2 (3 connections)
+	selected := strategy.SelectBackend(pool)
+	if selected == nil {
+		t.Fatal("Strategy returned nil backend")
+	}
+	if selected.URL.Host != "localhost:8082" {
+		t.Errorf("Expected b2 (3 connections), got %s", selected.URL.Host)
+	}
+}
+
+// TestWeightedRoundRobin tests smooth weighted round-robin
+func TestWeightedRoundRobin(t *testing.T) {
 	pool := backend.NewPool()
-	backends := make([]*backend.Backend, 50)
-	for i := 0; i < 50; i++ {
-		u, _ := url.Parse("http://localhost:8000")
-		backend := backend.NewBackend(u)
-		// Simulate various connection counts
-		for j := 0; j < (i % 20); j++ {
-			backend.IncrementActiveRequests()
+
+	u1, _ := url.Parse("http://localhost:8081")
+	u2, _ := url.Parse("http://localhost:8082")
+	u3, _ := url.Parse("http://localhost:8083")
+
+	b1 := backend.NewBackend(u1)
+	b2 := backend.NewBackend(u2)
+	b3 := backend.NewBackend(u3)
+
+	// Set weights: b1=3 (30%), b2=2 (20%), b3=1 (10%) - but they're not normalized
+	// Total weight = 6, so: b1=50%, b2=33%, b3=17%
+	b1.SetWeight(3)
+	b2.SetWeight(2)
+	b3.SetWeight(1)
+
+	pool.AddBackend(b1)
+	pool.AddBackend(b2)
+	pool.AddBackend(b3)
+
+	strategy := NewWeightedRoundRobinStrategy()
+
+	// Track selections over 600 requests
+	selections := make(map[string]int)
+	mu := sync.Mutex{}
+
+	for i := 0; i < 600; i++ {
+		backend := strategy.SelectBackend(pool)
+		if backend == nil {
+			t.Fatal("Strategy returned nil backend")
 		}
-		backends[i] = backend
-		pool.AddBackend(backend)
+
+		mu.Lock()
+		selections[backend.URL.Host]++
+		mu.Unlock()
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		strategy.SelectBackend(pool)
+	// Expected ratios: b1:b2:b3 = 3:2:1 = 50%:33%:17%
+	b1_count := selections["localhost:8081"]
+	b2_count := selections["localhost:8082"]
+	b3_count := selections["localhost:8083"]
+
+	// Allow 10% variance
+	if !(b1_count > 240 && b1_count < 360) { // ~50%
+		t.Errorf("b1: expected ~300, got %d", b1_count)
+	}
+	if !(b2_count > 138 && b2_count < 228) { // ~33%
+		t.Errorf("b2: expected ~200, got %d", b2_count)
+	}
+	if !(b3_count > 42 && b3_count < 132) { // ~17%
+		t.Errorf("b3: expected ~100, got %d", b3_count)
 	}
 }

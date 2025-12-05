@@ -1,0 +1,46 @@
+# Build artifacts and binaries
+*.exe
+*.dll
+*.so
+*.out
+*.o
+*.obj
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go specific
+.mod
+go.sum.bak
+
+# Test and coverage
+coverage/
+coverage.out
+coverage.html
+*.test
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Environment
+.env
+.env.local
+
+# Project specific
+plan.txt
+COMPLETION_STATUS.md
+TEST_COVERAGE_REPORT.md
+gobalance.exe
+*.out
+
+coverage
