@@ -29,6 +29,11 @@ func LoadConfig(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("no backends configured")
 	}
 
+	// Request timeout default (FIX #8)
+	if config.RequestTimeout == 0 {
+		config.RequestTimeout = 30 // 30 seconds default
+	}
+
 	// Health check defaults
 	if config.HealthCheck.Interval == 0 {
 		config.HealthCheck.Interval = 5

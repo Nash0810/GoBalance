@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Nash0810/gobalance/internal/backend"
 	"github.com/Nash0810/gobalance/internal/health"
 	"github.com/Nash0810/gobalance/internal/logging"
 	"github.com/Nash0810/gobalance/internal/metrics"
 	"github.com/Nash0810/gobalance/internal/retry"
+	"github.com/google/uuid"
 )
 
 // Balancer handles request routing
@@ -23,6 +24,7 @@ type Balancer struct {
 	strategy        Strategy
 	passiveTracker  *health.PassiveTracker
 	retryPolicy     *retry.Policy
+	requestTimeout  time.Duration                     // Per-request timeout (FIX #8)
 	circuitBreakers map[string]*health.CircuitBreaker // Per-backend circuit breakers
 	cbMux           sync.RWMutex                      // Protects circuit breakers map
 	collector       *metrics.Collector                // Prometheus metrics
@@ -30,12 +32,13 @@ type Balancer struct {
 }
 
 // NewBalancer creates a new balancer instance
-func NewBalancer(pool *backend.Pool, strategy Strategy, passiveTracker *health.PassiveTracker, retryPolicy *retry.Policy, collector *metrics.Collector, logger *logging.Logger) *Balancer {
+func NewBalancer(pool *backend.Pool, strategy Strategy, passiveTracker *health.PassiveTracker, retryPolicy *retry.Policy, requestTimeout time.Duration, collector *metrics.Collector, logger *logging.Logger) *Balancer {
 	return &Balancer{
 		pool:            pool,
 		strategy:        strategy,
 		passiveTracker:  passiveTracker,
 		retryPolicy:     retryPolicy,
+		requestTimeout:  requestTimeout,
 		circuitBreakers: make(map[string]*health.CircuitBreaker),
 		collector:       collector,
 		logger:          logger,
@@ -69,11 +72,16 @@ func (lb *Balancer) getCircuitBreaker(backend *backend.Backend) *health.CircuitB
 }
 
 // ServeHTTP implements http.Handler interface
-// Incorporates FIX #2 (body buffering), FIX #4 (context propagation)
+// Incorporates FIX #2 (body buffering), FIX #4 (context propagation), FIX #8 (request timeout)
 func (lb *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Generate request ID
 	requestID := uuid.New().String()
 	r.Header.Set("X-Request-ID", requestID)
+
+	// FIX #8: Apply request timeout with context
+	ctx, cancel := context.WithTimeout(r.Context(), lb.requestTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
 
 	startTime := time.Now()
 

@@ -6,11 +6,12 @@ import (
 
 // Config represents the load balancer configuration
 type Config struct {
-	Port        int               `yaml:"port"`         // Load balancer port
-	Backends    []BackendConfig   `yaml:"backends"`     // Backend URLs with weights
-	Strategy    string            `yaml:"strategy"`     // Load balancing strategy
-	HealthCheck HealthCheckConfig `yaml:"health_check"` // Health check configuration
-	Retry       RetryConfig       `yaml:"retry"`        // Retry configuration
+	Port           int               `yaml:"port"`            // Load balancer port
+	Backends       []BackendConfig   `yaml:"backends"`        // Backend URLs with weights
+	Strategy       string            `yaml:"strategy"`        // Load balancing strategy
+	RequestTimeout int               `yaml:"request_timeout"` // Per-request timeout in seconds
+	HealthCheck    HealthCheckConfig `yaml:"health_check"`    // Health check configuration
+	Retry          RetryConfig       `yaml:"retry"`           // Retry configuration
 }
 
 // BackendConfig represents a single backend configuration

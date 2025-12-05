@@ -1,5 +1,6 @@
 port: 8080
 strategy: "round-robin" # Options: round-robin, weighted-round-robin, least-connections
+request_timeout: 30 # Per-request timeout in seconds (FIX #8)
 
 backends:
   - url: "http://localhost:8081"

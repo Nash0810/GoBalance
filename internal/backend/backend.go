@@ -118,3 +118,10 @@ func (b *Backend) SetWeight(weight int) {
 	}
 	b.Weight = weight
 }
+
+// CopyHealthMetrics copies health metrics from another backend (for config reload)
+func (b *Backend) CopyHealthMetrics(m HealthMetrics) {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+	b.metrics = m
+}

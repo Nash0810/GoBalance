@@ -95,12 +95,50 @@ func main() {
 			"budget_percent", cfg.Retry.BudgetPercent)
 	}
 
-	// Create balancer with metrics and logging
-	lb := balancer.NewBalancer(pool, strategy, passiveTracker, retryPolicy, collector, logger)
+	// Log request timeout configuration (FIX #8)
+	logger.Info("request_timeout_configured",
+		"timeout_seconds", cfg.RequestTimeout)
+
+	// Create balancer with metrics, logging, and timeout
+	requestTimeout := time.Duration(cfg.RequestTimeout) * time.Second
+	lb := balancer.NewBalancer(pool, strategy, passiveTracker, retryPolicy, requestTimeout, collector, logger)
 
 	// Start metrics exporter
 	exporter := metrics.NewExporter(collector, pool, retryPolicy.GetBudget())
 	go exporter.Start(ctx)
+
+	// Start config watcher for hot reload
+	configWatcher, err := config.NewWatcher("configs/config.yaml", logger, func(newCfg *config.Config) error {
+		logger.Info("applying_config_reload")
+
+		// Parse new backends
+		newBackends, err := newCfg.ParseBackends()
+		if err != nil {
+			return err
+		}
+
+		// Create new backend instances
+		var backends []*backend.Backend
+		for _, pb := range newBackends {
+			b := backend.NewBackend(pb.URL)
+			b.SetWeight(pb.Weight)
+			backends = append(backends, b)
+			logger.Info("new_backend_configured",
+				"url", b.URL.String(),
+				"weight", b.Weight)
+		}
+
+		// Replace backends in pool (preserves health state of existing backends)
+		pool.ReplaceBackends(backends)
+
+		logger.Info("backends_reloaded", "count", len(backends))
+		return nil
+	})
+	if err != nil {
+		logger.Error("failed_to_create_config_watcher", "error", err.Error())
+	} else {
+		go configWatcher.Start(ctx)
+	}
 
 	// Create HTTP server
 	mux := http.NewServeMux()
