@@ -3,44 +3,51 @@ package health
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/Nash0810/gobalance/internal/backend"
 	"github.com/Nash0810/gobalance/internal/config"
+	"github.com/Nash0810/gobalance/internal/logging"
+	"github.com/Nash0810/gobalance/internal/metrics"
 )
 
 // ActiveChecker performs periodic health checks on backends
 type ActiveChecker struct {
-	pool   *backend.Pool
-	config config.HealthCheckConfig
-	client *http.Client
+	pool       *backend.Pool
+	config     config.HealthCheckConfig
+	client     *http.Client
+	collector  *metrics.Collector   // Prometheus metrics
+	logger     *logging.Logger      // Structured logger
 }
 
 // NewActiveChecker creates a new active health checker
-func NewActiveChecker(pool *backend.Pool, cfg config.HealthCheckConfig) *ActiveChecker {
+func NewActiveChecker(pool *backend.Pool, cfg config.HealthCheckConfig, 
+	collector *metrics.Collector, logger *logging.Logger) *ActiveChecker {
 	return &ActiveChecker{
-		pool:   pool,
-		config: cfg,
-		client: &http.Client{
+		pool:      pool,
+		config:    cfg,
+		client:    &http.Client{
 			Timeout: time.Duration(cfg.Timeout) * time.Second,
 		},
+		collector: collector,
+		logger:    logger,
 	}
 }
 
 // Start begins the health check loop (runs in background goroutine)
 func (ac *ActiveChecker) Start(ctx context.Context) {
 	if !ac.config.Enabled {
-		log.Println("Active health checks disabled")
+		ac.logger.Info("active_health_checks_disabled")
 		return
 	}
 
 	ticker := time.NewTicker(time.Duration(ac.config.Interval) * time.Second)
 	defer ticker.Stop()
 
-	log.Printf("Active health checker started (interval: %ds, timeout: %ds)",
-		ac.config.Interval, ac.config.Timeout)
+	ac.logger.Info("active_health_checker_started",
+		"interval_seconds", ac.config.Interval,
+		"timeout_seconds", ac.config.Timeout)
 
 	// Run initial check immediately
 	ac.checkAllBackends()
@@ -48,7 +55,7 @@ func (ac *ActiveChecker) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Active health checker stopped")
+			ac.logger.Info("active_health_checker_stopped")
 			return
 		case <-ticker.C:
 			ac.checkAllBackends()
@@ -68,12 +75,22 @@ func (ac *ActiveChecker) checkAllBackends() {
 // checkBackend performs health check on a single backend
 func (ac *ActiveChecker) checkBackend(b *backend.Backend) {
 	url := fmt.Sprintf("%s%s", b.URL.String(), ac.config.Path)
+	startTime := time.Now()
 
 	resp, err := ac.client.Get(url)
+	duration := time.Since(startTime).Seconds()
+
+	if ac.collector != nil {
+		ac.collector.HealthCheckTotal.WithLabelValues(b.URL.Host, "attempt").Inc()
+		ac.collector.HealthCheckDuration.WithLabelValues(b.URL.Host).Observe(duration)
+	}
 
 	if err != nil {
 		// Check failed
 		ac.handleFailure(b, err)
+		if ac.collector != nil {
+			ac.collector.HealthCheckTotal.WithLabelValues(b.URL.Host, "failure").Inc()
+		}
 		return
 	}
 	defer resp.Body.Close()
@@ -81,9 +98,15 @@ func (ac *ActiveChecker) checkBackend(b *backend.Backend) {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Check succeeded
 		ac.handleSuccess(b)
+		if ac.collector != nil {
+			ac.collector.HealthCheckTotal.WithLabelValues(b.URL.Host, "success").Inc()
+		}
 	} else {
 		// Non-2xx status code
 		ac.handleFailure(b, fmt.Errorf("status code: %d", resp.StatusCode))
+		if ac.collector != nil {
+			ac.collector.HealthCheckTotal.WithLabelValues(b.URL.Host, "failure").Inc()
+		}
 	}
 }
 
@@ -99,8 +122,11 @@ func (ac *ActiveChecker) handleSuccess(b *backend.Backend) {
 	// State transition: DOWN/UNHEALTHY → HEALTHY
 	if currentState != backend.Healthy {
 		if metrics.ConsecutiveSuccesses >= ac.config.HealthyThreshold {
-			log.Printf("[HEALTH] %s: %s → HEALTHY (after %d successes)",
-				b.URL.Host, currentState, metrics.ConsecutiveSuccesses)
+			ac.logger.Info("health_check_passed_state_transition",
+				"backend", b.URL.Host,
+				"old_state", currentState,
+				"new_state", "HEALTHY",
+				"consecutive_successes", metrics.ConsecutiveSuccesses)
 			b.SetState(backend.Healthy)
 		}
 	}
@@ -112,14 +138,19 @@ func (ac *ActiveChecker) handleFailure(b *backend.Backend, err error) {
 	metrics := b.GetHealthMetrics()
 	currentState := b.GetState()
 
-	log.Printf("[HEALTH] %s: Check failed: %v (failures: %d)",
-		b.URL.Host, err, metrics.ConsecutiveFailures)
+	ac.logger.Warn("health_check_failed",
+		"backend", b.URL.Host,
+		"error", err.Error(),
+		"consecutive_failures", metrics.ConsecutiveFailures)
 
 	// State transition: HEALTHY → UNHEALTHY
 	if currentState == backend.Healthy {
 		if metrics.ConsecutiveFailures >= ac.config.UnhealthyThreshold {
-			log.Printf("[HEALTH] %s: HEALTHY → UNHEALTHY (after %d failures)",
-				b.URL.Host, metrics.ConsecutiveFailures)
+			ac.logger.Warn("health_state_transition",
+				"backend", b.URL.Host,
+				"old_state", currentState,
+				"new_state", "UNHEALTHY",
+				"consecutive_failures", metrics.ConsecutiveFailures)
 			b.SetState(backend.Unhealthy)
 		}
 	}
