@@ -1,7 +1,3 @@
-# Phase 7 Automation Scheduler
-# Schedules and runs traffic increases according to the plan
-# Version: 1.0
-# Date: December 5, 2025
 
 param(
     [string]$Action = "status",

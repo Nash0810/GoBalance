@@ -1,0 +1,382 @@
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'gobalance-production'
+    environment: 'production'
+    phase: 'pilot'
+
+rule_files:
+  - 'alert_rules.yml'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:9093']
+
+scrape_configs:
+  # GoBalance Load Balancer
+  - job_name: 'gobalance'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+
+  # Backend Servers
+  - job_name: 'backends'
+    static_configs:
+      - targets: ['localhost:8081', 'localhost:8082', 'localhost:8083']
+    scrape_interval: 30s
+
+  # System Metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+    scrape_interval: 30s
+
+  # Database Metrics
+  - job_name: 'database'
+    static_configs:
+      - targets: ['localhost:5432']
+    scrape_interval: 30s
+
+---
+# ALERTMANAGER CONFIGURATION
+# alertmanager.yml
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'gobalance-alerts'
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      continue: true
+      group_wait: 10s
+      repeat_interval: 1h
+
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 1m
+
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+
+receivers:
+  - name: 'gobalance-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#gobalance-production'
+        title: 'GoBalance Alert'
+        text: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+
+  - name: 'critical-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_CRITICAL}'
+        channel: '#gobalance-critical'
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_SERVICE_KEY}'
+    email_configs:
+      - to: 'oncall@company.com'
+        from: 'gobalance@company.com'
+        smarthost: 'smtp.company.com:587'
+        auth_username: '${SMTP_USER}'
+        auth_password: '${SMTP_PASSWORD}'
+
+  - name: 'warning-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#gobalance-warnings'
+
+  - name: 'info-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#gobalance-info'
+
+inhibit_rules:
+  # Suppress warnings if critical exists
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'dev', 'instance']
+
+  # Suppress info if warning exists
+  - source_match:
+      severity: 'warning'
+    target_match:
+      severity: 'info'
+    equal: ['alertname', 'dev', 'instance']
+
+---
+# GRAFANA DASHBOARD CONFIGURATION
+# Metrics to display and visualizations
+
+dashboards:
+  main:
+    title: "GoBalance Production - Phase 7 Pilot"
+    refresh: "30s"
+    time_range: "last 6 hours"
+    
+    panels:
+      # Request Rate
+      - title: "Request Rate (req/s)"
+        type: "graph"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'rate(http_requests_total[1m])'
+        thresholds:
+          warning: 5000
+          critical: 10000
+
+      # Error Rate
+      - title: "Error Rate (%)"
+        type: "graph"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'rate(http_requests_total{status=~"5.."}[1m]) / rate(http_requests_total[1m]) * 100'
+        thresholds:
+          warning: 0.5
+          critical: 1.0
+        alert_on_threshold: true
+
+      # Response Time (p99)
+      - title: "Response Time - p99 (ms)"
+        type: "graph"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) * 1000'
+        thresholds:
+          warning: 100
+          critical: 200
+
+      # Response Time Distribution
+      - title: "Response Time Distribution"
+        type: "heatmap"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'rate(http_request_duration_seconds_bucket[1m])'
+
+      # Traffic Split (Canary vs Current)
+      - title: "Traffic Split - Pilot Distribution"
+        type: "pie"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'sum(rate(http_requests_total{balancer="gobalance"}[1m]))'
+          - expr: 'sum(rate(http_requests_total{balancer="old"}[1m]))'
+
+      # Backend Health Status
+      - title: "Backend Health Status"
+        type: "table"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'backend_health_status'
+        columns:
+          - name: Backend
+            values: "instance"
+          - name: Status
+            values: "value"
+          - name: Requests
+            values: "http_requests_total"
+          - name: Errors
+            values: "http_errors_total"
+
+      # CPU Usage
+      - title: "CPU Usage (%)"
+        type: "graph"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'rate(process_cpu_seconds_total[1m]) * 100'
+        thresholds:
+          warning: 70
+          critical: 90
+
+      # Memory Usage
+      - title: "Memory Usage"
+        type: "graph"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'process_resident_memory_bytes / 1024 / 1024'
+        description: "Memory leak detection"
+
+      # Connection Pool
+      - title: "Connection Pool Status"
+        type: "graph"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'backend_connection_pool_active'
+          - expr: 'backend_connection_pool_idle'
+          - expr: 'backend_connection_pool_max'
+
+      # Failover Events
+      - title: "Failover Events"
+        type: "table"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'increase(backend_failover_total[1d])'
+
+      # Database Performance
+      - title: "Database Query Latency"
+        type: "graph"
+        datasource: "Prometheus"
+        targets:
+          - expr: 'histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m])) * 1000'
+
+---
+# ALERT RULES
+# alert_rules.yml
+
+groups:
+  - name: gobalance_production
+    interval: 30s
+    rules:
+      # Error Rate Alert
+      - alert: HighErrorRate
+        expr: |
+          (sum(rate(http_requests_total{status=~"5.."}[5m])) / 
+           sum(rate(http_requests_total[5m]))) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected (> 1%)"
+          description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+
+      # Response Time Alert
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) * 1000 > 200
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High response time (p99 > 200ms)"
+          description: "p99 latency is {{ $value }}ms on {{ $labels.instance }}"
+
+      # CPU Usage Alert
+      - alert: HighCPUUsage
+        expr: |
+          rate(process_cpu_seconds_total[5m]) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage (> 90%)"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+
+      # Memory Leak Detection
+      - alert: MemoryGrowth
+        expr: |
+          (process_resident_memory_bytes - 
+           avg_over_time(process_resident_memory_bytes[1h])) / 
+          avg_over_time(process_resident_memory_bytes[1h]) > 0.1
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Potential memory leak detected"
+          description: "Memory growth > 10% in 30m on {{ $labels.instance }}"
+
+      # Backend Failure Alert
+      - alert: BackendDown
+        expr: |
+          backend_health_status == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend server down"
+          description: "Backend {{ $labels.instance }} is not responding"
+
+      # Connection Pool Exhaustion
+      - alert: ConnectionPoolExhaustion
+        expr: |
+          backend_connection_pool_active / backend_connection_pool_max > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Connection pool near capacity"
+          description: "Connection pool {{ $value | humanizePercentage }} utilized on {{ $labels.instance }}"
+
+      # Database Latency
+      - alert: DatabaseLatency
+        expr: |
+          histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m])) * 1000 > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database query latency"
+          description: "Database latency p95 is {{ $value }}ms on {{ $labels.instance }}"
+
+      # Failover Events
+      - alert: FailoverEvent
+        expr: |
+          increase(backend_failover_total[1m]) > 0
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "Failover event detected"
+          description: "Backend failover occurred on {{ $labels.instance }}"
+
+      # Traffic Imbalance
+      - alert: TrafficImbalance
+        expr: |
+          abs(rate(http_requests_total{backend="backend1"}[5m]) - 
+              rate(http_requests_total{backend="backend2"}[5m])) / 
+          rate(http_requests_total[5m]) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Traffic imbalance detected"
+          description: "Request distribution is uneven across backends"
+
+---
+# PROMETHEUS RETENTION AND STORAGE
+
+storage:
+  retention: 15d
+  retention_size: 100GB
+  
+  tsdb:
+    path: /var/lib/prometheus
+    wal_segment_size: 512MB
+    max_block_duration: 2d
+
+---
+# MONITORING SUCCESS CRITERIA
+
+success_metrics:
+  - metric: error_rate
+    target: < 0.1%
+    alert_threshold: 1%
+  
+  - metric: response_time_p99
+    target: < 50ms
+    alert_threshold: 200ms
+  
+  - metric: availability
+    target: > 99.9%
+    alert_threshold: < 99.0%
+  
+  - metric: cpu_usage
+    target: < 70%
+    alert_threshold: > 90%
+  
+  - metric: memory_usage
+    target: stable
+    alert_threshold: > 10% growth
+

@@ -1,8 +1,3 @@
-# Phase 7 Production Pilot - Traffic Automation Orchestrator
-# Automates traffic increases, monitoring, go/no-go decisions, and reporting
-# Version: 1.0
-# Date: December 5, 2025
-# PowerShell 5.1 Compatible
 
 param(
     [string]$ConfigFile = "phase7_automation.json",

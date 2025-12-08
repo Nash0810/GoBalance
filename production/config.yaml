@@ -1,0 +1,141 @@
+port: 9090
+environment: production
+log_level: info
+
+# Backend servers for production
+backends:
+  - url: http://prod-backend-1.internal:8081
+    weight: 3
+    health_check:
+      path: /health
+      interval: 5s
+  - url: http://prod-backend-2.internal:8082
+    weight: 2
+    health_check:
+      path: /health
+      interval: 5s
+  - url: http://prod-backend-3.internal:8083
+    weight: 1
+    health_check:
+      path: /health
+      interval: 5s
+
+# Load balancing strategy
+strategy: weighted-round-robin
+
+# Health checking configuration
+health_check:
+  active:
+    enabled: true
+    interval: 5s
+    path: /health
+    timeout: 3s
+  passive:
+    enabled: true
+    failure_threshold: 3
+
+# Circuit breaker configuration
+circuit_breaker:
+  enabled: true
+  failure_threshold: 5
+  timeout: 30s
+  half_open_requests: 3
+
+# Connection pooling
+connection_pool:
+  min_connections: 10
+  max_connections: 100
+  max_idle_connections: 20
+  idle_timeout: 30s
+  connection_timeout: 5s
+
+# Request handling
+request:
+  timeout: 30s
+  max_body_size: 10MB
+  keep_alive: enabled
+
+# Retry policy
+retry:
+  enabled: true
+  max_attempts: 2
+  budget_percentage: 10
+  backoff_ms: 100
+
+# Rate limiting
+rate_limit:
+  enabled: true
+  requests_per_second: 10000
+  burst_size: 1000
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  prometheus_port: 9090
+  collect_percentiles: [50, 95, 99, 99.9]
+  histogram_buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000]
+
+# Logging
+logging:
+  format: json
+  output: stdout
+  level: info
+  sample_rate: 1.0
+  fields:
+    - timestamp
+    - level
+    - message
+    - request_id
+    - duration_ms
+    - status_code
+    - error
+
+# TLS/SSL Configuration
+tls:
+  enabled: true
+  cert_file: /etc/certs/gobalance.crt
+  key_file: /etc/certs/gobalance.key
+  min_version: "1.2"
+
+# Production SLA targets
+sla:
+  availability_target: 0.9995 # 99.95%
+  error_rate_max: 0.001 # 0.1%
+  p99_latency_max_ms: 50
+
+# Canary deployment settings
+canary:
+  enabled: true
+  traffic_percentage: 5 # Start at 5% for pilot
+  old_balancer_percentage: 95 # 95% to existing system
+  traffic_increase_schedule:
+    - day: 1
+      percentage: 5
+    - day: 2
+      percentage: 10
+    - day: 3
+      percentage: 15
+    - day: 4
+      percentage: 25
+    - day: 5
+      percentage: 40
+    - day: 6
+      percentage: 60
+    - day: 7
+      percentage: 80
+    - day: 8
+      percentage: 100
+
+# Graceful shutdown
+shutdown:
+  timeout: 30s
+  drain_connections: true
+  wait_for_requests: true
+
+# Monitoring and alerting
+alerts:
+  error_rate_threshold: 0.01 # Alert if > 1%
+  response_time_threshold_ms: 200
+  cpu_threshold_percent: 90
+  memory_threshold_percent: 85
+  connection_pool_utilization: 80

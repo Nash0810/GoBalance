@@ -74,3 +74,8 @@ automation/phase7_status.json
 gobalance.exe
 *.out
 coverage
+
+
+*.md
+
+!README.md
