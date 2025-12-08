@@ -1,0 +1,100 @@
+{
+  "automation": {
+    "enabled": true,
+    "version": "1.0",
+    "created": "2025-12-05"
+  },
+  "schedule": {
+    "increase_times": [
+      {
+        "day": "Dec 6",
+        "traffic_from": 5,
+        "traffic_to": 12,
+        "time": "06:00",
+        "monitoring_hours": 18
+      },
+      {
+        "day": "Dec 7",
+        "traffic_from": 12,
+        "traffic_to": 25,
+        "time": "12:00",
+        "monitoring_hours": 18
+      },
+      {
+        "day": "Dec 8",
+        "traffic_from": 25,
+        "traffic_to": 50,
+        "time": "12:00",
+        "monitoring_hours": 18
+      },
+      {
+        "day": "Dec 9",
+        "traffic_from": 50,
+        "traffic_to": 100,
+        "time": "12:00",
+        "monitoring_hours": 24
+      }
+    ]
+  },
+  "backends": [
+    {
+      "name": "Backend-1",
+      "port": 8081,
+      "health_check_interval": 30
+    },
+    {
+      "name": "Backend-2",
+      "port": 8082,
+      "health_check_interval": 30
+    },
+    {
+      "name": "Backend-3",
+      "port": 8083,
+      "health_check_interval": 30
+    }
+  ],
+  "gobalance": {
+    "name": "GoBalance",
+    "port": 9090,
+    "health_check_interval": 30
+  },
+  "load-balancer": {
+    "type": "nginx",
+    "config_file": "/etc/nginx/nginx.conf",
+    "reload_command": "nginx -s reload",
+    "current_weight": 5,
+    "server_line": "server localhost:9090 weight"
+  },
+  "prometheus": {
+    "port": 9090,
+    "retention": "15d",
+    "scrape_interval": "30s"
+  },
+  "thresholds": {
+    "error_rate": 0.1,
+    "response_time": 50,
+    "cpu_threshold": 70,
+    "memory_threshold": 80
+  },
+  "monitoring": {
+    "default_interval_minutes": 30,
+    "intensive_interval_minutes": 5,
+    "intensive_duration_minutes": 15
+  },
+  "notifications": {
+    "enabled": true,
+    "on_error": true,
+    "on_success": false,
+    "channels": [
+      {
+        "type": "log",
+        "level": "all"
+      }
+    ]
+  },
+  "rollback": {
+    "enabled": true,
+    "auto_rollback_on_critical_error": false,
+    "notify_before_rollback": true
+  }
+}

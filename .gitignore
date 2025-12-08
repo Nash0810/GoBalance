@@ -2,7 +2,6 @@
 *.exe
 *.dll
 *.so
-*.out
 *.o
 *.obj
 
@@ -30,23 +29,21 @@ coverage.html
 # Temporary files
 *.tmp
 *.bak
-*.log
 
 # Environment
 .env
 .env.local
+.venv/
 
-# Project specific - exclude generated/temporary files only
+# Generated/temporary logs (KEEP AUTOMATION SCRIPTS AND CONFIGS)
+*.log
+automation_logs/
+automation_reports/
+
+# Project-specific excludes (temp reports, status files)
 plan.txt
 COMPLETION_STATUS.md
 TEST_COVERAGE_REPORT.md
-gobalance.exe
-*.out
-
-coverage
-
-# Documentation - keep important docs, exclude temp reports
-# Exclude only specific non-essential markdown and text files
 ACTUAL_LOAD_TEST_ANALYSIS.md
 ACTUAL_LOAD_TEST_RESULTS.txt
 CHAOS_TEST_RESULTS.md
@@ -57,22 +54,23 @@ INTEGRATION_TEST_REPORT.md
 LOAD_TEST_RESULTS.md
 NEXT_STEPS_GUIDE.md
 OPERATIONS_RUNBOOK.md
-PHASE_*.md
+PHASE_5_COMPLETION_REPORT.md
+PHASE_6_STAGING_REPORT.md
+PHASE_7_ACCELERATION_FAQ.md
+PHASE_7_DEPLOYMENT_EXECUTION.md
+PHASE_7_EXECUTIVE_SUMMARY.md
+PHASE_7_PRODUCTION_PILOT_DEPLOYMENT_STATUS.md
+PHASE_7_PRODUCTION_PILOT_PLAN.md
+PHASE_7_TRAFFIC_ACCELERATION_STRATEGY.md
+PHASE_7_TRAFFIC_INCREASE_GUIDE.md
 PRODUCTION_DEPLOYMENT_GUIDE.md
 PROJECT_COMPLETION_SUMMARY.md
-STATUS_PHASE_*.md
+STATUS_PHASE_6_COMPLETE.md
 
-# Automation - exclude logs, reports, generated files
-automation_logs/
-automation_reports/
+# Automation - exclude status and generated files only
 automation/phase7_status.json
-automation/phase7_automation.json
 
-# Keep but don't track
-*.psm1.bak
-automation/phase7_automation.json
-.gitignore
-automation/phase7_scheduler.ps1
-automation/phase7_orchestrator.ps1
-.venv/
-automation/phase7_status.json
+# Build output
+gobalance.exe
+*.out
+coverage
