@@ -36,7 +36,7 @@ coverage.html
 .env
 .env.local
 
-# Project specific
+# Project specific - exclude generated/temporary files only
 plan.txt
 COMPLETION_STATUS.md
 TEST_COVERAGE_REPORT.md
@@ -45,6 +45,34 @@ gobalance.exe
 
 coverage
 
-*.md
-*.txt
-!readme.md
+# Documentation - keep important docs, exclude temp reports
+# Exclude only specific non-essential markdown and text files
+ACTUAL_LOAD_TEST_ANALYSIS.md
+ACTUAL_LOAD_TEST_RESULTS.txt
+CHAOS_TEST_RESULTS.md
+SESSION_SUMMARY.md
+FINAL_PROJECT_STATUS.md
+FINAL_STATUS.md
+INTEGRATION_TEST_REPORT.md
+LOAD_TEST_RESULTS.md
+NEXT_STEPS_GUIDE.md
+OPERATIONS_RUNBOOK.md
+PHASE_*.md
+PRODUCTION_DEPLOYMENT_GUIDE.md
+PROJECT_COMPLETION_SUMMARY.md
+STATUS_PHASE_*.md
+
+# Automation - exclude logs, reports, generated files
+automation_logs/
+automation_reports/
+automation/phase7_status.json
+automation/phase7_automation.json
+
+# Keep but don't track
+*.psm1.bak
+automation/phase7_automation.json
+.gitignore
+automation/phase7_scheduler.ps1
+automation/phase7_orchestrator.ps1
+.venv/
+automation/phase7_status.json
