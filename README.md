@@ -106,7 +106,7 @@ DOWN → (2 consecutive successful checks) → HEALTHY
 - Not retried: 4xx, 5xx responses (backend already processed the request)
 - Code: `isRetryableError()` in `retry.go:135`
 
-**Adaptive Retry Budget** (`budget.go` - FIX #9)
+**Adaptive Retry Budget** (`budget.go`)
 
 - Token bucket implementation with **adaptive refill rate**
 - Global limit: maximum 10% of requests can be retries
@@ -120,7 +120,7 @@ DOWN → (2 consecutive successful checks) → HEALTHY
   - Adapts to actual traffic pattern automatically
 - Code: `TrackRequest()` + `refill()` method
 
-**Request Body Buffering** (`retry.go:80-95` - FIX #2)
+**Request Body Buffering** (`retry.go:80-95`)
 
 - For POST/PATCH retries, must restore request body
 - Solution: Buffer entire body into memory (`io.ReadAll`)
@@ -435,7 +435,7 @@ internal/
 │   ├── strategy.go       # Interface
 │   ├── roundrobin.go     # Atomic counter
 │   ├── leastconn.go      # Min active connections
-│   ├── weightedrr.go     # Smooth weighted (FIX #7)
+│   ├── weightedrr.go     # Smooth weighted
 │   └── balancer.go       # Main proxy handler
 │
 ├── backend/
@@ -446,11 +446,11 @@ internal/
 ├── health/
 │   ├── active.go         # Periodic probing
 │   ├── passive.go        # Request-based detection
-│   └── circuitbreaker.go # Sliding window (FIX #6)
+│   └── circuitbreaker.go # Sliding window
 │
 ├── retry/
-│   ├── retry.go          # Policy & body buffering (FIX #2)
-│   └── budget.go         # Adaptive token bucket (FIX #9)
+│   ├── retry.go          # Policy & body buffering
+│   └── budget.go         # Adaptive token bucket
 │
 ├── config/
 │   ├── config.go         # Structures
@@ -487,15 +487,6 @@ internal/
 
 - `gopkg.in/yaml.v3` — Config parsing
 - `github.com/fsnotify/fsnotify` — File watching
-
----
-
-## Files of Interest
-
-- **FIX #2**: `retry.go:80-95` — Request body buffering
-- **FIX #6**: `circuitbreaker.go:130-155` — Sliding window
-- **FIX #7**: `weightedrr.go:60-95` — Smooth algorithm
-- **FIX #9**: `budget.go:55-80` — Adaptive refill
 
 ---
 
